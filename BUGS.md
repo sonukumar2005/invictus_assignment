@@ -12,19 +12,21 @@ Keep this file in the repo and **commit it** with your fixes.
 
 **What is wrong:** The list is showing oldest expenses first. Newest should be at the top.
 
-**What I changed:** Two bugs, both in the sorting path.
+**What I changed:** Spent a bit digging on this one bc it looked like a one-line fix but was actually two bugs stacked on top of each other lol.
 
-1. `dateValue()` in `src/lib/format.js` just returned the raw date string instead of converting it to a comparable value. Subtracting two ISO date strings (e.g. `"2026-03-12" - "2026-03-10"`) coerces them with `Number()`, which returns `NaN` for a string like `"2026-03-12"`. A comparator that always returns `NaN` is treated as `0` by `.sort()`, so the array never actually got reordered — it just stayed in whatever order it started in. Fixed by parsing the date into a timestamp: `new Date(date).getTime()`.
-2. In `src/components/ExpenseList.jsx`, the comparator was `dateValue(a.date) - dateValue(b.date)`, which sorts ascending (oldest first) even once dates parse correctly. Changed it to `dateValue(b.date) - dateValue(a.date)` for descending (newest first), matching the "Newest first" label.
+First thing — `dateValue()` in format.js wasn't doing anything useful, it just handed back the same string you gave it. So when the sort tried `a.date - b.date`, it was really doing something like `"2026-03-12" - "2026-03-10"`, and JS has no idea what to do with that so it just returns `NaN`. And if your sort function always returns `NaN`, `.sort()` basically gives up and leaves the array however it found it. So the list was never being sorted, period — it just kinda looked sorted by coincidence based on the order the data was in. Fixed that by actually converting the date to a real timestamp with `new Date(date).getTime()`.
+
+Second thing, once dates were parsing right, the comparison itself was backwards — it was doing `a - b` which sorts oldest first. Swapped it to `b - a` so newest shows up first, which is what the label already promised.
 
 ---
+
 
 ## Bug 2
 
 **How to reproduce:** Get a group into a state where one person's debt exactly equals another person's credit — e.g. Alice and Bob each owe $50, Carlos and Diya are each owed $50 (balances: `{Alice: -50, Bob: -50, Carlos: 50, Diya: 50}`). Open the "Settle up" panel.
 
-**What is wrong:** The panel shows "Everyone is settled" (or drops that pair silently) even though money is still owed. In `suggestSettlements()` (`src/lib/settle.js`), the loop has three branches for comparing a debtor's amount to a creditor's amount: greater-than, less-than, and equal. The greater-than and less-than branches both push a transfer before advancing; the equal branch (`d.amount === c.amount`) only advances `i` and `j` — it never records the transfer. So whenever a debt and a credit match exactly, that payment simply vanishes from the suggestions instead of being listed.
+**What is wrong:** It tells you "Everyone is settled" which is just... not true, people still owe money. Traced it back to `settle.js` — the loop matching people who owe money to people who are owed money has three cases: debtor owes more than creditor's owed, creditor's owed more than debtor owes, or they're the exact same amount. First two cases both add the payment to the list properly. The "exact same amount" case does nothing, it just skips to the next pair without recording anything. So any time the numbers line up perfectly, that payment just quietly vanishes and nobody gets told to pay it.
 
-**What I changed:** Added the missing `transfers.push(...)` in the equal branch, same as the other two branches, before incrementing `i` and `j`. Verified with `{1: -50, 2: -50, 3: 50, 4: 50}` — before the fix `suggestSettlements` returned `[]`; after the fix it correctly returns two $50 transfers (1→3, 2→4).
+**What I changed:** Added the same `transfers.push(...)` that the other two branches had, just missing from this one. Tested with `{1: -50, 2: -50, 3: 50, 4: 50}` — before the fix it returned nothing (empty array, which makes no sense since people owe $100 total), after the fix it correctly shows the two $50 payments that need to happen.
 
 ---
